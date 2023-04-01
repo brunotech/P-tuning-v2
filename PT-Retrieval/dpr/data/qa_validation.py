@@ -79,7 +79,7 @@ def check_answer(questions_answers_docs, tokenizer, match_type, index=0) -> List
     global dpr_all_documents
     hits = []
 
-    for i, doc_id in enumerate(doc_ids):
+    for doc_id in doc_ids:
         doc = dpr_all_documents[doc_id]
         # modified
         text = doc[index] # 0 for abstract, 1 for title
@@ -112,7 +112,7 @@ def has_answer(answers, text, tokenizer, match_type) -> bool:
             single_answer = tokenizer.tokenize(single_answer)
             single_answer = single_answer.words(uncased=True)
 
-            for i in range(0, len(text) - len(single_answer) + 1):
+            for i in range(len(text) - len(single_answer) + 1):
                 if single_answer == text[i: i + len(single_answer)]:
                     return True
 

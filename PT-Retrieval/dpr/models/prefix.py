@@ -17,11 +17,11 @@ class PrefixEncoder(torch.nn.Module):
     def __init__(self, config):
         super().__init__()
         self.prefix_mlp = config.prefix_mlp
-        logger.info(f"Initializing PrefixEncoder")
+        logger.info("Initializing PrefixEncoder")
         logger.info(f" > pre_seq_len: {config.pre_seq_len}")
         logger.info(f" > prefix_mlp: {config.prefix_mlp}")
         logger.info(f" > prefix_hidden_size: {config.prefix_hidden_size}")
-        
+
         if self.prefix_mlp:
             # Use a two-layer MLP to encode the prefix
             self.embedding = torch.nn.Embedding(config.pre_seq_len, config.hidden_size)
@@ -34,12 +34,10 @@ class PrefixEncoder(torch.nn.Module):
             self.embedding = torch.nn.Embedding(config.pre_seq_len, config.num_hidden_layers * 2 * config.hidden_size)
 
     def forward(self, prefix: torch.Tensor):
-        if self.prefix_mlp:
-            prefix_tokens = self.embedding(prefix)
-            past_key_values = self.trans(prefix_tokens)
-        else:
-            past_key_values = self.embedding(prefix)
-        return past_key_values
+        if not self.prefix_mlp:
+            return self.embedding(prefix)
+        prefix_tokens = self.embedding(prefix)
+        return self.trans(prefix_tokens)
 
 
 class BertModelModifed(BertModel):
@@ -143,16 +141,17 @@ class BertModelModifed(BertModel):
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
 
-        if not return_dict:
-            return (sequence_output, pooled_output) + encoder_outputs[1:]
-
-        return BaseModelOutputWithPoolingAndCrossAttentions(
-            last_hidden_state=sequence_output,
-            pooler_output=pooled_output,
-            past_key_values=encoder_outputs.past_key_values,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
-            cross_attentions=encoder_outputs.cross_attentions,
+        return (
+            BaseModelOutputWithPoolingAndCrossAttentions(
+                last_hidden_state=sequence_output,
+                pooler_output=pooled_output,
+                past_key_values=encoder_outputs.past_key_values,
+                hidden_states=encoder_outputs.hidden_states,
+                attentions=encoder_outputs.attentions,
+                cross_attentions=encoder_outputs.cross_attentions,
+            )
+            if return_dict
+            else (sequence_output, pooled_output) + encoder_outputs[1:]
         )
 
 class BertPrefixModel(BertPreTrainedModel):
@@ -208,7 +207,7 @@ class BertPrefixModel(BertPreTrainedModel):
         prefix_attention_mask = torch.ones(batch_size, self.pre_seq_len).to(self.bert.device)
         attention_mask = torch.cat((prefix_attention_mask, attention_mask), dim=1)
 
-        outputs = self.bert(
+        return self.bert(
             input_ids,
             attention_mask=attention_mask,
             token_type_ids=token_type_ids,
@@ -221,14 +220,12 @@ class BertPrefixModel(BertPreTrainedModel):
             past_key_values=past_key_values,
         )
 
-        return outputs
-
 
 class BertPromptModel(BertPreTrainedModel):
     def __init__(self, config, add_pooling_layer=True):
         super().__init__(config)
         self.num_labels = config.num_labels
-        
+
         self.bert = BertModel(config, add_pooling_layer=add_pooling_layer)
         self.embeddings = self.bert.embeddings
         self.dropout = torch.nn.Dropout(config.hidden_dropout_prob)
@@ -244,12 +241,8 @@ class BertPromptModel(BertPreTrainedModel):
         self.prefix_tokens = torch.arange(self.pre_seq_len).long()
         self.prefix_encoder = torch.nn.Embedding(self.pre_seq_len, config.hidden_size)
 
-        bert_param = 0
-        for _, param in self.bert.named_parameters():
-            bert_param += param.numel()
-        all_param = 0
-        for _, param in self.named_parameters():
-            all_param += param.numel()
+        bert_param = sum(param.numel() for _, param in self.bert.named_parameters())
+        all_param = sum(param.numel() for _, param in self.named_parameters())
         logger.info( " ***************** PARAMETERS ***************** ")
         logger.info(f" # all param       : {all_param}")
         logger.info(f" # bert param      : {bert_param}")
@@ -258,8 +251,7 @@ class BertPromptModel(BertPreTrainedModel):
 
     def get_prompt(self, batch_size):
         prefix_tokens = self.prefix_tokens.unsqueeze(0).expand(batch_size, -1).to(self.bert.device)
-        prompts = self.prefix_encoder(prefix_tokens)
-        return prompts
+        return self.prefix_encoder(prefix_tokens)
 
     def forward(
             self,

@@ -33,8 +33,15 @@ def get_trainer(args):
         for index in random.sample(range(len(dataset.train_dataset)), 3):
             logger.info(f"Sample {index} of the training set: {dataset.train_dataset[index]}.")
 
-    if not dataset.multiple_choice:
-        config = AutoConfig.from_pretrained(
+    config = (
+        AutoConfig.from_pretrained(
+            model_args.model_name_or_path,
+            num_labels=dataset.num_labels,
+            finetuning_task=data_args.dataset_name,
+            revision=model_args.model_revision,
+        )
+        if dataset.multiple_choice
+        else AutoConfig.from_pretrained(
             model_args.model_name_or_path,
             num_labels=dataset.num_labels,
             label2id=dataset.label2id,
@@ -42,19 +49,12 @@ def get_trainer(args):
             finetuning_task=data_args.dataset_name,
             revision=model_args.model_revision,
         )
-    else:
-        config = AutoConfig.from_pretrained(
-            model_args.model_name_or_path,
-            num_labels=dataset.num_labels,
-            finetuning_task=data_args.dataset_name,
-            revision=model_args.model_revision,
-        )
-
-    if not dataset.multiple_choice:
-        model = get_model(model_args, TaskType.SEQUENCE_CLASSIFICATION, config)
-    else:
-        model = get_model(model_args, TaskType.MULTIPLE_CHOICE, config, fix_bert=True)
-
+    )
+    model = (
+        get_model(model_args, TaskType.MULTIPLE_CHOICE, config, fix_bert=True)
+        if dataset.multiple_choice
+        else get_model(model_args, TaskType.SEQUENCE_CLASSIFICATION, config)
+    )
     # Initialize our Trainer
     trainer = BaseTrainer(
         model=model,

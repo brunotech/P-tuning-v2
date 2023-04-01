@@ -29,10 +29,16 @@ def get_led_reader_components(args, inference_only: bool = False, **kwargs):
     reader = LedReader(encoder, hidden_size)
     # for param in reader.parameters():
     #     print(param.data.shape)
-    optimizer = get_optimizer(reader,
-                              learning_rate=args.learning_rate,
-                              adam_eps=args.adam_eps, weight_decay=args.weight_decay,
-                              ) if not inference_only else None
+    optimizer = (
+        None
+        if inference_only
+        else get_optimizer(
+            reader,
+            learning_rate=args.learning_rate,
+            adam_eps=args.adam_eps,
+            weight_decay=args.weight_decay,
+        )
+    )
 
     # tensorizer = get_bert_tensorizer(args, AutoTokenizer.from_pretrained(args.pretrained_model_cfg))
     tokenizer = AutoTokenizer.from_pretrained(args.pretrained_model_cfg, add_special_tokens=False)

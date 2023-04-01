@@ -32,12 +32,10 @@ class PrefixEncoder(torch.nn.Module):
             self.embedding = torch.nn.Embedding(config.pre_seq_len, config.num_hidden_layers * 2 * config.hidden_size)
 
     def forward(self, prefix: torch.Tensor):
-        if self.prefix_mlp:
-            prefix_tokens = self.embedding(prefix)
-            past_key_values = self.trans(prefix_tokens)
-        else:
-            past_key_values = self.embedding(prefix)
-        return past_key_values
+        if not self.prefix_mlp:
+            return self.embedding(prefix)
+        prefix_tokens = self.embedding(prefix)
+        return self.trans(prefix_tokens)
 
 
 class BertModelModifed(BertModel):
@@ -141,16 +139,17 @@ class BertModelModifed(BertModel):
         sequence_output = encoder_outputs[0]
         pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
 
-        if not return_dict:
-            return (sequence_output, pooled_output) + encoder_outputs[1:]
-
-        return BaseModelOutputWithPoolingAndCrossAttentions(
-            last_hidden_state=sequence_output,
-            pooler_output=pooled_output,
-            past_key_values=encoder_outputs.past_key_values,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
-            cross_attentions=encoder_outputs.cross_attentions,
+        return (
+            BaseModelOutputWithPoolingAndCrossAttentions(
+                last_hidden_state=sequence_output,
+                pooler_output=pooled_output,
+                past_key_values=encoder_outputs.past_key_values,
+                hidden_states=encoder_outputs.hidden_states,
+                attentions=encoder_outputs.attentions,
+                cross_attentions=encoder_outputs.cross_attentions,
+            )
+            if return_dict
+            else (sequence_output, pooled_output) + encoder_outputs[1:]
         )
 
 class PrefixColBERT(BertPreTrainedModel):
@@ -188,14 +187,8 @@ class PrefixColBERT(BertPreTrainedModel):
 
         self.prefix_tokens = torch.arange(self.pre_seq_len).long()
         self.prefix_encoder = PrefixEncoder(config)
-        # self.prefix_encoder = torch.nn.Embedding(self.pre_seq_len, config.hidden_size)
-
-        bert_param = 0
-        for name, param in self.bert.named_parameters():
-            bert_param += param.numel()
-        all_param = 0
-        for name, param in self.named_parameters():
-            all_param += param.numel()
+        bert_param = sum(param.numel() for name, param in self.bert.named_parameters())
+        all_param = sum(param.numel() for name, param in self.named_parameters())
         total_param = all_param - bert_param
         print(f"total param is {all_param} => {total_param}")
     
@@ -257,5 +250,7 @@ class PrefixColBERT(BertPreTrainedModel):
         return (-1.0 * ((Q.unsqueeze(2) - D.unsqueeze(1))**2).sum(-1)).max(-1).values.sum(-1)
 
     def mask(self, input_ids):
-        mask = [[(x not in self.skiplist) and (x != 0) for x in d] for d in input_ids.cpu().tolist()]
-        return mask
+        return [
+            [(x not in self.skiplist) and (x != 0) for x in d]
+            for d in input_ids.cpu().tolist()
+        ]
